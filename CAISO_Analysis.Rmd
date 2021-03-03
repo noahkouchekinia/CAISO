@@ -1,10 +1,20 @@
 ---
-title: "CA Electric Demand"
+title: "CA Electric Demand Analysis"
 author: "Noah Kouchekinia"
 date: "2/27/2021"
-output: html_document
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      toc_collapsed: FALSE
+    toc_depth: 3
+    number_sections: true
+    theme: lumen
+    highlight: haddock
 ---
+
 # Introduction
+
 This workbook scrapes, cleans, and analyzes electric demand data from the CA-ISO. Electrical consumption has recently received attention as an high frequency alternative measure of macroeconomic activity. For example, nation-wide energy consumption is one of several factors in the Federal Reserve Bank of New York's Weekly Economic Index.  The goal of this analysis is to evaluate electrical consumption as proxy for output, particularly in the context of the pandemic induced recession. 
 ```{r background_setup, include=FALSE, message = FALSE, warning = FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -13,7 +23,7 @@ setwd("~/Documents/Job Search/Code Sample/CAISO/")
 ```
 
 # Set Up
-### Set Up Environment
+## Set Up Environment
 ```{r setup, message = FALSE, warning = FALSE}
 #Set working directory
   setwd("/home/noah/Documents/Job Search/Code Sample/CAISO")
@@ -25,7 +35,7 @@ setwd("~/Documents/Job Search/Code Sample/CAISO/")
   library(tis)
 ```
 
-### Define Useful Functions
+## Define Useful Functions
 ```{r function, message = FALSE, warning = FALSE}
 #A function to take the difference between UK and CA time on any given day.
 #Later, a API call will require times in GMT+-0, rather than local time. 
@@ -47,14 +57,14 @@ setwd("~/Documents/Job Search/Code Sample/CAISO/")
   }
 ```
 
-### Aestetic Set-Up
+## Aestetic Set-Up
 ```{r aestetic}
 theme_nk <- theme_minimal
 ```
 
 # Data Collection
 
-### Scrape Latest CA-ISO Data
+## Scrape Latest CA-ISO Data
 
 Here, I query from the California Independent System Operator's (ISO). Their OASIS API allowed me to pull hour by hour demand. However, querying from this API is challenging. Documentation is limited. Furthermore, the API limits the amount of data that can be downloaded with each pull, requiring many repetitive pulls. 
 

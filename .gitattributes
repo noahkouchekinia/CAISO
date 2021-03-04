@@ -1,5 +1,5 @@
 *.html linguist-documentation
 
-*.Rmd linguist-language=md
+*.Rmd linguist-language=R
 
 *.rmd linguist-language=R

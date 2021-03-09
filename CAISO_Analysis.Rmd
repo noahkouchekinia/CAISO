@@ -6,7 +6,7 @@ output:
   html_document:
     toc: true
     toc_float:
-      toc_collapsed: FALSE
+      toc_collapsed: false
     toc_depth: 3
     number_sections: true
     theme: lumen
@@ -15,24 +15,30 @@ output:
 
 # Introduction
 
-This workbook scrapes, cleans, and analyzes electric demand data from the CA-ISO. Electrical consumption has recently received attention as an high frequency alternative measure of macroeconomic activity. For example, nation-wide energy consumption is one of several factors in the Federal Reserve Bank of New York's Weekly Economic Index.  The goal of this analysis is to evaluate electrical consumption as proxy for output, particularly in the context of the pandemic induced recession. 
+This workbook scrapes, cleans, and analyzes electric demand data from the CA-ISO. Electrical consumption has recently received attention as an high frequency alternative measure of macroeconomic activity. For example, nation-wide energy consumption is one of several factors in the Federal Reserve Bank of New York's Weekly Economic Index.  The goal of this analysis is to evaluate electrical consumption as proxy for output, particularly in the context of the pandemic induced recession. This script is written to query all data necessary, bit will use local data as available. 
+
+Code is published at: (https://github.com/noahkouchekinia/CAISO)[https://github.com/noahkouchekinia/CAISO]
 ```{r background_setup, include=FALSE, message = FALSE, warning = FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_knit$set(root.dir = "~/Documents/Job Search/Code Sample/CAISO/")
-setwd("~/Documents/Job Search/Code Sample/CAISO/")
+knitr::opts_knit$set(root.dir = "/home/noah/Documents/Code Samples/CAISO")
 ```
 
 # Set Up
 ## Set Up Environment
 ```{r setup, message = FALSE, warning = FALSE}
 #Set working directory
-  setwd("/home/noah/Documents/Job Search/Code Sample/CAISO")
+  setwd("/home/noah/Documents/Code Samples/CAISO")
 
 #Load Necessary Packages
   library(tidyverse)
   library(lubridate)
   library(ggplot2)
   library(tis)
+  library(tis)
+  library(jsonlite)
+  library(tigris)
+  library(zoo)
+  library(stargazer)
 ```
 
 ## Define Useful Functions
@@ -55,12 +61,19 @@ setwd("~/Documents/Job Search/Code Sample/CAISO/")
     offset <- a_time-b_time
     return(offset)
   }
+
+#Colors
+
+col1 <- "#2e5e8b"
+col2 <- "#8baf3e"
+col3 <- "#fcc62d"
+col4 <- "#88cde5"
+col5 <- "#474747"
+
+#Get BOD Theme
+#   source("S:/Monroe/ERcharts/r_backend/function.R") 
 ```
 
-## Aestetic Set-Up
-```{r aestetic}
-theme_nk <- theme_minimal
-```
 
 # Data Collection
 
@@ -70,15 +83,16 @@ Here, I query from the California Independent System Operator's (ISO). Their OAS
 
 ```{r scrape}
 #Set query parameters
-  start_date     <- as.Date("2012-01-01")
+  start_date     <- as.Date("2011-06-01") #Set to after PGE structural break
   end_date       <- Sys.Date()
   market_process <- "ACTUAL"              #Select from: 2DA, 7DA, DAM, ACTUAL, RTM
 
 #Check for data downloaded in previous scrapes, adjust scraping start date accordingly
-  extant_data <- read.csv("/home/noah/Documents/Job Search/Code Sample/CAISO/Data/Actual Hourly Integrated Load by Region.csv") #CHANGE THIS TO RELATIVE PATH BEFORE PUB
+  extant_data <- read.csv("/home/noah/Documents/Code Samples/CAISO/Data/Actual Hourly Integrated Load by Region.csv") #CHANGE THIS TO RELATIVE PATH BEFORE PUB
   extant_data$X <- NULL
   extant_data$OPR_DT <- as.Date(extant_data$OPR_DT)
-  n_start_date <- max(start_date, max(extant_data$OPR_DT-1))
+  
+  n_start_date <- max(start_date, max(extant_data$OPR_DT-1, na.rm = TRUE))
 
 #Prepare dates used to loop through portions of days (30 at a time)
   #Create Vector of start and end dates
@@ -115,19 +129,21 @@ Here, I query from the California Independent System Operator's (ISO). Their OAS
     }
 
 #Clean and export choice cuts of data
-  caiso_df <- data_list[unlist(lapply(data_list,ncol))==14] %>%  
-    bind_rows()%>%
-    select(c("OPR_DT","OPR_HR","TAC_AREA_NAME","LABEL","POS","MW"))%>%
-    mutate(OPR_DT = as.Date(OPR_DT),
-           TAC_AREA_NAME <- as.character(TAC_AREA_NAME))%>%
-    bind_rows(extant_data)%>%
-    group_by(OPR_DT,OPR_HR,TAC_AREA_NAME) %>%
-    summarize(LABEL = last(LABEL), POS = last(POS),MW = last(MW)) %>%
-    mutate(date = OPR_DT, hour_f = factor(OPR_HR))%>%
-    filter(TAC_AREA_NAME =="CA ISO-TAC")
-    
-#Conclude
-  write.csv(caiso_df, "/home/noah/Documents/Job Search/Code Sample/CAISO//Data/Actual Hourly Integrated Load by Region.csv",row.names = FALSE) #Save Data
+  caiso_df <- data_list[unlist(lapply(data_list,ncol))==14] %>%
+     bind_rows()%>%
+     select(c("OPR_DT","OPR_HR","TAC_AREA_NAME","LABEL","POS","MW"))%>%
+     mutate(OPR_DT = as.Date(OPR_DT),
+            TAC_AREA_NAME <- as.character(TAC_AREA_NAME))%>%
+     bind_rows(extant_data)%>%
+     group_by(OPR_DT,OPR_HR,TAC_AREA_NAME) %>%
+     summarize(LABEL = last(LABEL), POS = last(POS),MW = last(MW)) %>%
+     mutate(date = OPR_DT, hour_f = factor(OPR_HR))
+  
+
+ 
+
+ #Save Data
+  write.csv(caiso_df, "/home/noah/Documents/Code Samples/CAISO//Data/Actual Hourly Integrated Load by Region.csv",row.names = FALSE)
   rm(list = c("market_process", "extant_data","all_dates","end_dates","end_offset","fname","i","n_start_date",
               "q_base", "q_end_date", "q_format", "q_process", "q_start_date","q_v","query","start_dates",
               "start_offset", "tf"))
@@ -178,12 +194,120 @@ As I will soon demonstrate, electrical demand data is extremely volatile, and de
            cool = as.numeric(cool))
 
 #Conclude 
-  write.csv(degree_days, "~/Documents/Job Search/Code Sample/CAISO//Data/degree_days.csv", row.names = FALSE)
+  write.csv(degree_days, "~/Documents/Code Samples/CAISO//Data/degree_days.csv", row.names = FALSE)
+```
+
+
+## Pull Solar Radiaion Series
+California has a sizable and increasing amount of rooftop solar. If residents use rooftop solar to offset consumption of electricity from the grid, the trend and cyclical components of rooftop solar generation need to be removed from our electricity demanded series.
+
+### Daylight Cycle
+Perhaps the crudest way to get at solar generation capacity is the amount of daylight hours per day. This is cyclical throughout the year.
+```{r daylight}
+#I need to pick a single point to query to represent Calfiornia. Let's use the population centroid
+#Source: https://www2.census.gov/geo/docs/reference/cenpop2010/CenPop2010_Mean_ST.txt
+  ca_pop_centroid <- c(+35.463595,-119.325359)
+
+#Check for extant data, let's not query data we already have.
+  extant_exist <- file.exists("./Data/daylight.csv")
+  if(extant_exist){
+    extant_data <- read.csv(file = "./Data/daylight.csv")
+    extant_dates <- as.Date(extant_data$date)
+    date_range <- as.Date(start_date:end_date, origin ="1970-01-01")
+    query_dates <- date_range[!date_range %in% extant_dates]
+  }
+  if(!extant_exist){
+    query_dates <- as.Date(start_date:end_date, origin ="1970-01-01")
+  }
+  
+#Query API if nessesary
+  query_needed <- length(query_dates) > 0
+  if(query_needed){
+    #generate api calls
+      api_calls <- paste0("https://api.sunrise-sunset.org/json?",
+                          "lat=", ca_pop_centroid[1],
+                          "&lng=",ca_pop_centroid[2],
+                          "&date=",query_dates,
+                          "&formatted=0")
+    #Set vectors to store query results
+      sunrise <- character(length=length(api_calls))
+      sunset <- character(length=length(api_calls))
+      day_length <- character(length=length(api_calls))
+    
+    #Loop through api queries
+      for(i in 1:length(api_calls)){
+        results <-fromJSON(url(api_calls[i]))[[1]]
+        sunrise[i]    <-results$sunrise[1]
+        sunset[i]     <-results$sunset[1]
+        day_length[i] <-results$day_length[1]
+      }
+    #create data.frame
+      daylight <- data.frame(date = query_dates, sunrise, sunset, day_length)
+    #combine with old data, if nessesary
+      if(extant_exist){
+        daylight <- rbind(daylight, extant_data)
+      }
+    #write for future use
+        write.csv(daylight, file = "./Data/daylight.csv", row.names = FALSE)
+
+  }
+  if(!query_needed){
+    daylight <- extant_data
+  }
+#Encode date collumn
+  daylight$date <- as.Date(daylight$date ) 
+```
+
+### Downward Solar Radiation Data
+
+This portion is a work in progress. 
+```{r radiation, eval = FALSE}
+#Get California Geographic boundaries
+#I am ignoring islands, they are not on in CA-ISO anyways.
+  us_shape <- tigris::states()
+  ca_geo <- as.data.frame(us_shape[us_shape$STUSPS == "CA","geometry"][[1]][[1]][[1]][[1]])
+  ca_geo_query <- paste(paste(ca_geo$V1,ca_geo$V2, sep = "+"),collapse = "%")
+
+#Set up other components of query
+  api_key = 'NOlwzKodWvBC5ZmHixTB1elMbiOiEZ8fNKDocxac'
+  wkt = paste0("POLYGON(",ca_geo_query,")")
+  attributes = "dhi,dni,ghi"
+  leap_year = 'true'
+  interval = '60'
+  utc = 'false'
+  your_name = 'Noah+Kouchekinia'
+  reason_for_use = 'electric+demand+correcting'
+  your_affiliation = 'FRBSF'
+  your_email = 'n.a.kouchekinia@sf.frb.org'
+  mailing_list = 'false'
+  
+#Build Query
+    url = paste0("https://developer.nrel.gov/api/solar/nsrdb_psm3_download.csv?",
+                 "wkt=POLYGON(",ca_geo_query,")&",
+                 "names=2020&",
+                 "leap_day=",leap_year,"&",
+                 "interval=",interval,"&",
+                 "utc=",utc,"&",
+                 "full_name=",your_name,"&",
+                 "email=",your_email,"&",
+                 "affiliation=",your_affiliation,"&",
+                 "mailing_list=",mailing_list,"&",
+                 "reason=",reason_for_use,"&",
+                 "api_key=",api_key,"&",
+                 "attributes=",attributes)
+ radiation_json <- read_json(url)
+```
+
+### Installed Solar Capacity
+
+This portion is a work in progress
+```{r installed}
+#placeholder
 ```
 
 ## Create Weekday/Holiday Series
 
-Electrical usage also varies with work scheduals. We need day of the week and holidays
+Electrical usage also varies with work schedules. We need day-of-the-week and holiday dummies to account for this variation.
 
 ```{r holiday}
 #Get Federal Holidays Using the tis package
@@ -217,64 +341,210 @@ Electrical usage also varies with work scheduals. We need day of the week and ho
 
 # Analysis
 
-## Corrected Daily Series
+## Correcting the Daily Series
+
+### Linear Model
 
 Most standard seasonal adjustment does not work on daily data
 
 ```{r}
-#Combine Time Series
-  electric_demand_daily <- caiso_df %>%
-    group_by(date) %>%
-    summarize(MW = sum(MW), hours = n()) %>%
-    filter(hours == 24) %>%
-    select(!hours) %>%
-    left_join(degree_days) %>%
-    left_join(day_dummies) 
-
-# Lets look at Relationships
-  plot(x = electric_demand_daily$cool, y = electric_demand_daily$MW)
-  plot(x = electric_demand_daily$cool*electric_demand_daily$cool, y = electric_demand_daily$MW)
+#Extract TAC*Date Panel from CASIO Data
+  electric_tac_hourly <- caiso_df %>%
+    filter(!(TAC_AREA_NAME =="CA ISO-TAC") & grepl("-TAC",TAC_AREA_NAME)) %>% #Keep only TAC desegregation level data
+    mutate(TAC_AREA_NAME = replace(TAC_AREA_NAME,TAC_AREA_NAME == "MWD-TAC","SCE-TAC"))%>% #join recently split MWD back to SCE
+    filter(!TAC_AREA_NAME == "VEA-TAC")%>% #Drop VEA, which is mostly in Nevada
+    group_by(date, OPR_HR, TAC_AREA_NAME) %>% 
+    summarize(MW = sum(MW))  #Add together MWD & SCE
   
-  plot(x = electric_demand_daily$heat, y = electric_demand_daily$MW)
-  plot(x = electric_demand_daily$day_of_week, y = electric_demand_daily$MW)
+  electric_tac_daily <- electric_tac_hourly %>%
+    group_by(date, TAC_AREA_NAME) %>%
+    summarize(MW = sum(MW), hours = n()) %>% #Add together hours for daily series
+    filter(hours == 24) %>% #Check that days are complete
+    select(!hours)
+```
+
+```{r model, results = 'asis'}
+#Assemble all data for model
+  daily_model_df <- electric_tac_daily %>%
+    left_join(degree_days) %>%
+    left_join(day_dummies) %>%
+    left_join(daylight) %>%
+    filter(date >= as.Date(start_date) & date <= as.Date(end_date))
 
 #Model Hourly series
 #Here, we want to retain houly variation, but correct for weather and holidays
-  daily_model <- lm(MW ~ heat+ 
-                         cool+ 
-                         cool^2 +
-                         date*cool +
-                         holiday+ 
-                         day_of_week,#+
-                         #structural_break,
-              data = electric_demand_daily, 
+  daily_model <- lm(MW ~ TAC_AREA_NAME + 
+                         TAC_AREA_NAME*heat+ 
+                         TAC_AREA_NAME*cool+ 
+                         TAC_AREA_NAME*holiday+ 
+                         TAC_AREA_NAME*day_of_week+
+                         TAC_AREA_NAME*as.numeric(day_length),
+              data = daily_model_df, 
               na.action = na.exclude)
 
-  summary(daily_model)
+  stargazer(daily_model, type = "html")
   
-  electric_demand_daily <- electric_demand_daily %>%
-    mutate(MW_corrected = residuals(daily_model) + mean(MW, na.rm = TRUE) - mean(residuals(daily_model), na.rm = TRUE))
+  daily_model_df <- daily_model_df %>%
+    ungroup()%>%
+    mutate(MW_predicted = predict(daily_model),
+           MW_corrected = (MW - MW_predicted) + mean(MW_predicted, na.rm = TRUE))%>%
+    group_by(date)%>%
+    summarize(MW_predicted = sum(MW_predicted), MW = sum(MW), MW_corrected = sum(MW_corrected))
+    
+  # plot(daily_model_df$date, daily_model_df$MW, type = "l")
+  # lines(daily_model_df$date, daily_model_df$MW_predicted, type = "l", col = "red")
+  # lines(daily_model_df$date, daily_model_df$MW_corrected, type = "l", col = "blue")
+```
 
-  plot(electric_demand_daily$date, electric_demand_daily$MW, type = "l")
-  lines(electric_demand_daily$date, electric_demand_daily$MW_corrected, type = "l", col = "red")
+### Additonal Smoothing
+There is some remaining, mostly random, day-to-day variation we are not so interested in. Let's remove this with a seven day moving average.
+```{r smoothing}
+  daily_model_df$MW_corrected_MA7 <- rollapply(daily_model_df$MW_corrected, 
+                                                      width = 14,
+                                                      fill = NA,
+                                                      FUN = mean,
+                                                      na.rm=TRUE)
 
+ # plot(daily_model_df$date, daily_model_df$MW, type = "l")
+ #  lines(daily_model_df$date, daily_model_df$MW_predicted, type = "l", col = "red")
+ #  lines(daily_model_df$date, daily_model_df$MW_corrected, type = "l", col = "blue")
+ #  lines(daily_model_df$date, daily_model_df$MW_corrected_MA7, type = "l", col = "green")
+ #  
+ #  plot(daily_model_df$date, daily_model_df$MW_corrected_MA7, type = "l", col = "green")
+```
+
+
+## Plotting recent (conditional) consumption
+
+### Recent Electric Consumption
+
+```{r fig_1}
+#Modify Data for plot
+  fig_1_df <- daily_model_df %>%
+    select(date,MW_corrected,MW_corrected_MA7)%>%
+    pivot_longer(-date)%>%
+    group_by(name) %>% 
+    mutate(mean = mean(value[year(date)==2019], na.rm = TRUE)) %>%
+    ungroup() %>%
+    mutate(percent_of_mean = (value/mean)*100)
+
+#Set Annotation Points
+  ca_sip <- as.Date("2020-03-19")
+
+#Plot Using GGplot
+  fig_1 <- ggplot(data = fig_1_df)+
+    geom_vline(xintercept = ca_sip, col = "red")+
+    geom_line(aes(x=date,y=percent_of_mean, col = name), size = 1.25)+
+    scale_x_date(limits = c(as.Date("2020-01-01"), end_date))+
+    scale_y_continuous(limits = c(85, 110), labels = function(x){paste0(x-100,"%")}, name = "deviation from mean")+
+    scale_color_manual(labels = c("Weather/Weekday Corrected","14 day MA of corrected"),
+                         values = c(col4, col1))+
+    labs(title = "Recent Change in California Electric Demand",
+         caption = "Note: Date of statewide shelter in place order shown in red.\nSource: California ISO" )+
+    theme_minimal()+ ##CHANGE TO BOD THEME
+    theme(axis.title.y = element_text(), axis.title.x = element_blank())+
+    theme(legend.position="top", legend.direction = "horizontal", legend.title = element_blank())
+#Save  
+  ggsave(fig_1, file = "./Figures/EL_Fig_1_Long_Demand_Series.png", width = 12, height = 8)
+#Display
+  fig_1
+```
+
+### Electric Series in Total
+```{r fig_2}
+#Adjust data for plot
+  fig_2_df <- daily_model_df %>%
+    select(date, MW, MW_corrected, MW_corrected_MA7)%>%
+    pivot_longer(-date)
+#Plot with ggplot
+  fig_2 <- ggplot(data = fig_2_df)+
+    geom_vline(xintercept = ca_sip, col = "red")+
+    geom_line(aes(x=date,y=value/1000, col = name))+
+    labs(title = "California Electric Usage", 
+         caption = "Note: Date of statewide shelter in place order shown in red.\nSource: California ISO",
+         y = "Gigawatts")+
+    scale_color_manual(labels = c("Raw Demand","Weather/Weekday Corrected","14 day MA of corrected"),
+                       values = c(col3,col4,col1))+
+    theme_minimal()+ ##CHANGE TO BOD THEME
+    theme(axis.title.y = element_text(), axis.title.x = element_blank())+
+    theme(legend.position="top", legend.direction = "horizontal", legend.title = element_blank())
+
+#Save
+  ggsave(fig_2, file = "./Figures/EL_Fig_2_Long_Demand_Series.png", width = 12, height = 8)
+#Display
+  fig_2
+```
+
+### Electrical Consumption in 2020 Compared to Recent Years
+
+```{r fig_3}
+#Structure data for plot
+fig_3_area_df <- daily_model_df %>%
+  select(date, MW_corrected)%>%
+  mutate(year  = as.character(year(date)))%>%
+  filter(year %in% as.character(2014:2019))%>%
+  mutate(month = month(date),
+         day   = day(date))%>%
+  mutate(date  = as.Date(paste0("2020-",month,"-",day)))%>%
+  select(date, year, MW_corrected)%>%
+  group_by(date) %>%
+  arrange(year) %>%
+  summarize(min = min(MW_corrected), max = max(MW_corrected))%>%
+  mutate(min = rollapply(min,width = 14, fill = NA,FUN = mean,na.rm=TRUE))%>%
+  mutate(max = rollapply(max,width = 14, fill = NA,FUN = mean,na.rm=TRUE))
+
+fig_3_line_df <- daily_model_df %>%
+  filter(year(date)==2020)
+
+
+#Plot
+  fig_3 <- ggplot(data = fig_3_area_df)+
+    geom_vline(xintercept = ca_sip, col = "red")+
+    geom_ribbon(data = fig_3_area_df, aes(x=date,ymin = min/1000, ymax = max/1000, fill = "Range of previous 5 years"), col = NA)+
+    geom_line(data = fig_3_line_df, aes(x=date,y=MW_corrected_MA7/1000, color = "2020"), size = 1.25)+
+    labs(title = "CA ISO Electricity Usage: Comparing Recent Years",
+         y = "Gigawatts",
+         caption = "Note: Date of statewide shelter in place order shown in red.\nNote: Series are 14 day moving averages of weather/weekday corrected electric demand.\nSource: California ISO")+
+    scale_x_date(limits = c(as.Date("2020-01-07"), as.Date("2020-12-24")))+
+    theme_minimal()+
+    theme(axis.title.y = element_text(), axis.title.x = element_blank())+
+    theme(legend.position="top", legend.direction = "horizontal", legend.title = element_blank())+
+    scale_color_manual(label = "2020", values = col1)+
+    scale_fill_manual(label = "Range of previous 5 years", values = col4)
+
+#Save File
+  ggsave(fig_3, file = "./Figures/EL_Fig_3_Adjusted_Demand_Over_Recent_Years.png",
+         width = 12, height = 8)
+  
+#Display
+  fig_3
 ```
 
 ## Predicting Using the Time Series
 
+### Linear Model
+
+### MIDAS Model
+
 ## Time of Day Patterns
-```{r eval=FALSE}
-  electric_demand_hourly <- caiso_df %>%
-    left_join(degree_days) %>%
-    left_join(day_dummies)
-    
 
-hourly_model_1 <- lm(MW ~ factor(hour_f)*heat + 
-                         factor(hour_f)*cool + factor(hour_f)*holiday + factor(hour_f)*day_of_week,
-              data = electric_demand_hourly, 
-              na.action = na.exclude)
-daily_model_1 <- lm()
+Perhaps the pandemic economy has different patterns of electric consumption, beyond the dip in electric consumption. Lets look at electric usage throughout the day, by month. 
 
-summary(model_1)
+
+```{r time}
+fig_5_df <- electric_tac_hourly %>%
+  mutate(year = as.character(year(date)),
+         month = month(date, label = TRUE)) %>%
+  filter(year %in% c(2019,2020))%>%
+  group_by(year, month, OPR_HR, TAC_AREA_NAME) %>%
+  summarize(MW = mean(MW, na.rm = TRUE))%>%
+  group_by(year, month, OPR_HR) %>%
+  summarize(MW = sum(MW))
+
+ggplot(data = fig_5_df, aes(x = OPR_HR, y = MW, col = year, group = year))+
+  geom_line()+
+  facet_wrap(~ month, ncol = 4)+
+  theme_minimal()
+
 
 ```
